@@ -9,11 +9,11 @@ from . import networks3D
 from .densenet import *
 from .hypergraph_utils import *
 from .hypergraph import *
-from utils import contrastive_loss
+from utils import ema, contrastive_loss
 
-class HGIBSemiUnlabeledConsistencyModel(BaseModel):
+class HGIBSemiUnlabeledConsistencyEMAModel(BaseModel):
     def name(self):
-        return 'HGIBSemiUnlabeledConsistencyModel'
+        return 'HGIBSemiUnlabeledConsistencyEMAModel'
 
     @staticmethod
     def modify_commandline_options(parser, is_train=True):
@@ -52,9 +52,10 @@ class HGIBSemiUnlabeledConsistencyModel(BaseModel):
 
         self.criterionCE = torch.nn.CrossEntropyLoss()
         self.contrastive_loss = contrastive_loss.ContrastiveLoss(opt.batch_size)
+        
         # initialize optimizers
         if self.isTrain:
-            self.optimizer = torch.optim.Adam([{'params': self.netDecoder_HGIB.parameters()}, 
+            self.optimizer = torch.optim.AdamW([{'params': self.netDecoder_HGIB.parameters()}, 
                                                 {'params': self.netEncoder_MRI.parameters()}, 
                                                 {'params': self.netEncoder_PET.parameters()}, 
                                                 {'params': self.netEncoder_NonImage.parameters()},
@@ -127,7 +128,7 @@ class HGIBSemiUnlabeledConsistencyModel(BaseModel):
                 embedding = torch.cat((self.embedding_MRI, self.embedding_PET, self.embedding_NonImage), dim=1)
                 prediction = self.netClassifier(embedding)
                 self.loss_cls = self.criterionCE(prediction, self.target)
-
+                
                 # create hypergraph
                 self.HGconstruct(self.embedding_MRI.cpu().detach().numpy(), 
                                 self.embedding_PET.cpu().detach().numpy(), 
@@ -153,16 +154,17 @@ class HGIBSemiUnlabeledConsistencyModel(BaseModel):
                 MRI_np, PET_np, _, non_image, MRI_str_aug, PET_str_aug = data_u
                 embedding_MRI = self.netEncoder_MRI(MRI_np)
                 embedding_PET = self.netEncoder_PET(PET_np)
-
+                
                 embedding_MRI_str_aug = self.netEncoder_MRI(MRI_str_aug)
                 embedding_PET_str_aug = self.netEncoder_PET(PET_str_aug)
-
+                
                 loss_u = (self.contrastive_loss(embedding_MRI, embedding_MRI_str_aug) + self.contrastive_loss(embedding_PET, embedding_PET_str_aug)) + \
                     0.1*(self.contrastive_loss(embedding_MRI, embedding_PET_str_aug) + self.contrastive_loss(embedding_PET, embedding_MRI_str_aug))
                 self.loss = self.loss + weight_u * loss_x + weight_u * loss_u
                 self.optimizer.zero_grad()
                 self.loss.backward()
                 self.optimizer.step()
+                
                 if i % 100 == 0:
                     print('Iteration {}, loss for encoders {}, loss_x {}, loss_u {}'.format(
                         i, self.loss.item(), loss_x.item(), loss_u.item()))
@@ -173,65 +175,83 @@ class HGIBSemiUnlabeledConsistencyModel(BaseModel):
             self.set_HGinput(Label)
             num_graph_update = self.num_graph_update
             idx = torch.tensor(range(self.len_train)).to(self.device)
+            prediction_encoder = self.netClassifier(self.embedding)
+            for i in range(num_graph_update):
+                # prediction is  [y1, y5], (kl1 + kl5)/2.0
+                #hyper_graph = self.G.drop_hyperedges(drop_rate=0.2)
+                self.prediction = self.netDecoder_HGIB(self.embedding, self.G)
+                self.loss_cls = 0
+            
+                weight = [0.5, 0.5]
+                # self.prediction[0] = [y1, y5]
+                for t, pred in enumerate(self.prediction[0]):
+                    self.loss_cls += weight[t] * self.criterionCE(pred[idx], self.target[idx])
+
+                self.loss_kl = self.prediction[1]
+                # self.loss_kd = 0
+
+                if self.using_focalloss:
+                    gamma = 0.5
+                    alpha = 2
+                    pt = torch.exp(-self.loss_cls)
+                    self.loss_focal = (alpha * (1 - pt) ** gamma * self.loss_cls).mean()
+                    self.loss = self.loss_cls + self.loss_focal
+                else:
+                    self.loss = self.loss_cls
+                
+                self.loss = self.loss + self.loss_kl * self.beta
+                self.prediction_cur = self.prediction[0][-1][idx]
+                self.target_cur = self.target[idx]
+                self.pred_encoder = prediction_encoder[idx]
+                self.accuracy = (torch.softmax(self.prediction_cur, dim=1).argmax(dim=1) == self.target_cur).float().sum().float() / float(self.target_cur.size(0))
+                self.acc_encoder = (torch.softmax(self.pred_encoder, dim=1).argmax(dim=1) == self.target_cur).float().sum().float() / float(self.target_cur.size(0))
+                    
+                if (i % 20 == 0) or (i == (num_graph_update - 1)):
+                    print('Update the hyper-graph net for the {} times, total loss {}'.format(i, self.loss.item()))
+                self.optimizer.zero_grad()
+                self.loss.backward()
+                self.optimizer.step()
         elif phase == 'test':
-            num_graph_update = 1
-            idx = torch.tensor(range(self.len_test)).to(self.device) + self.len_train
+            with torch.no_grad():
+                MRI, PET, Non_Img, Label, length = self.get_features([train_loader, test_loader], phase=phase)
+                # create hypergraph
+                self.HGconstruct(MRI, PET, Non_Img)
+                self.info(length)
+                self.set_HGinput(Label)
+                num_graph_update = self.num_graph_update
+                idx = torch.tensor(range(self.len_test)).to(self.device) + self.len_train
+                #idx = torch.tensor(range(self.len_train)).to(self.device)
+                prediction_encoder = self.netClassifier(self.embedding)
+                # prediction is  [y1, y5], (kl1 + kl5)/2.0
+                #hyper_graph = self.G.drop_hyperedges(drop_rate=0.2)
+                self.prediction = self.netDecoder_HGIB(self.embedding, self.G)
+                self.loss_cls = 0
+                self.loss_kl = 0
+                self.loss_focal = 0
+                self.loss = self.loss_cls
+                
+                self.prediction_cur = self.prediction[0][-1][idx]
+                self.target_cur = self.target[idx]
+                self.pred_encoder = prediction_encoder[idx]
+                print('testing: shape of self.target_cur {}, shape of self.target {}'.format(self.target_cur.shape, self.target.shape))
+                self.accuracy = (torch.softmax(self.prediction_cur, dim=1).argmax(dim=1) == self.target_cur).float().sum().float() / float(self.target_cur.size(0))
+                self.acc_encoder = (torch.softmax(self.pred_encoder, dim=1).argmax(dim=1) == self.target_cur).float().sum().float() / float(self.target_cur.size(0))
         else:
             print('Wrong in loss calculation')
             exit(-1)
 
-        prediction_encoder = self.netClassifier(self.embedding)
-        for i in range(num_graph_update):
-            # prediction is  [y1, y5], (kl1 + kl5)/2.0
-            self.prediction = self.netDecoder_HGIB(self.embedding, self.G)
-            self.loss_cls = 0
-           
-            weight = [0.5, 0.5]
-            # self.prediction[0] = [y1, y5]
-            for t, pred in enumerate(self.prediction[0]):
-                self.loss_cls += weight[t] * self.criterionCE(pred[idx], self.target[idx])
-
-            self.loss_kl = self.prediction[1]
-            # self.loss_kd = 0
-
-            if self.using_focalloss:
-                gamma = 0.5
-                alpha = 2
-                pt = torch.exp(-self.loss_cls)
-                self.loss_focal = (alpha * (1 - pt) ** gamma * self.loss_cls).mean()
-                self.loss = self.loss_cls + self.loss_focal
-            else:
-                self.loss = self.loss_cls
-            
-            self.loss = self.loss + self.loss_kl * self.beta
-            self.prediction_cur = self.prediction[0][-1][idx]
-            self.target_cur = self.target[idx]
-            self.pred_encoder = prediction_encoder[idx]
-            self.accuracy = (torch.softmax(self.prediction_cur, dim=1).argmax(dim=1) == self.target_cur).float().sum().float() / float(self.target.size(0))
-            self.acc_encoder = (torch.softmax(self.pred_encoder, dim=1).argmax(dim=1) == self.target_cur).float().sum().float() / float(self.target.size(0))
-            
-            if phase == 'test':
-                continue
-            if (i % 20 == 0) or (i == (num_graph_update - 1)):
-                print('Update the hyper-graph net for the {} times, total loss {}'.format(i, self.loss.item()))
-            self.optimizer.zero_grad()
-            self.loss.backward()
-            self.optimizer.step()
 
     def optimize_parameters(self, train_loader, test_loader, train_loader_u=None, epoch=None):
-        #self.optimizer.zero_grad()
         # forward pass is here
-        #self.netClassifier.train()
-        #self.train()
+        self.netClassifier.train()
+        self.train()
         self.forward('train', train_loader, test_loader, train_loader_u, epoch)
-        #self.loss.backward()
-        #self.optimizer.step()
 
     def validation(self):
-        #self.netClassifier.eval()
-        #self.eval()
+        self.netClassifier.eval()
+        self.eval()
         with torch.no_grad():
-            self.forward('test')
+            self.forward('test', self.train_loader, self.test_loader)
 
     def get_pred_encoder(self):
         return self.pred_encoder
@@ -239,9 +259,9 @@ class HGIBSemiUnlabeledConsistencyModel(BaseModel):
     def get_acc_encoder(self):
         return self.acc_encoder
     
-    def get_features(self, loaders):
+    def get_features(self, loaders, phase='test'):
         # extract featrues from pre-trained model
-        # stack them 
+        # stack them
         MRI = None
         PET = None
         Non_Img = None
@@ -250,7 +270,7 @@ class HGIBSemiUnlabeledConsistencyModel(BaseModel):
         for idx, loader in enumerate(loaders):
             for i, data in enumerate(tqdm(loader)):
                 self.set_input(data)
-                i_MRI, i_PET, i_Non_Img = self.ExtractFeatures()
+                i_MRI, i_PET, i_Non_Img = self.ExtractFeatures(phase)
                 if MRI is None:
                     MRI = i_MRI
                     PET = i_PET
