@@ -82,7 +82,7 @@ def validation(model, epoch, writer):
     acc_pred_class_reduction = metric_encoder(pred_encoder, target)
     metric_encoder = MulticlassAccuracy(num_classes=num_classes, average=None, thresholds=None)
     acc_pred = metric_encoder(pred_encoder, target)
-    
+
     metric_encoder = MulticlassF1Score(num_classes=num_classes, average=None)
     F1 = metric_encoder(pred_encoder, target)
     metric_encoder = MulticlassAUROC(num_classes=num_classes, average=None, thresholds=None)
@@ -110,7 +110,7 @@ if __name__ == '__main__':
     min_pixel = int(opt.min_pixel * ((opt.patch_size[0] * opt.patch_size[1] * opt.patch_size[2]) / 100))
     # load dataset
     trainTransforms = Compose([RandFlip(prob=0.5), ScaleIntensity(), EnsureChannelFirst(), CenterSpatialCrop(opt.patch_size)])
-    train_set = NifitDataSet(opt.data_path, which_direction='AtoB', transforms=trainTransforms, shuffle_labels=False, train=True, phase='train', label_time=opt.label_time, control = opt.control, split=opt.split, num_ctrl=opt.num_ctrl)
+    train_set = NifitDataSet(opt.data_path, which_direction='AtoB', transforms=trainTransforms, shuffle_labels=False, train=True, phase='train', label_time=opt.label_time, control = opt.control, split=opt.split)
     print('length labeled train list:', len(train_set))
     if len(train_set) < opt.batch_size:
         drop_last = False
