@@ -9,11 +9,11 @@ from . import networks3D
 from .densenet import *
 from .hypergraph_utils import *
 from .hypergraph import *
-from utils import ema, contrastive_loss
+from utils import contrastive_loss
 
-class HGIBSemiUnlabeledConsistencyEMAModel(BaseModel):
+class HGIBSemiUnlabeledConsistencyModel(BaseModel):
     def name(self):
-        return 'HGIBSemiUnlabeledConsistencyEMAModel'
+        return 'HGIBSemiUnlabeledConsistencyModel'
 
     @staticmethod
     def modify_commandline_options(parser, is_train=True):
