@@ -55,6 +55,8 @@ def validation(model, epoch, writer):
 
     target = target.cpu().detach()
     metric = MulticlassAccuracy(num_classes=num_classes, average='micro', thresholds=None)
+    acc_class_reduction = metric(prediction, target)
+    metric = MulticlassAccuracy(num_classes=num_classes, average=None, thresholds=None)
     acc = metric(prediction, target)
 
     metric = MulticlassF1Score(num_classes=num_classes, average=None)
@@ -71,12 +73,16 @@ def validation(model, epoch, writer):
     CM = confmat(prediction, target)
 
     PPV, NPV = cal_metrics(CM)
-    print('[Validation] loss: ', np.sum(losses, 0) / len(losses), '\t\t Accuracy:', acc, 'AUC', AUROC,
-           'Mean AUC:', AUROC.mean(), 'PPV:', PPV, 'Mean PPV:', PPV.mean(), 'NPV:', NPV, 'Mean NPV:', NPV.mean())
+    print('[Validation] loss: ', np.sum(losses, 0) / len(losses), '\t\t Accuracy:', acc_class_reduction,
+          'Per-class Acc', acc, 'Mean Acc', acc.mean().item(), 'AUC', AUROC, 'Mean AUC:', AUROC.mean().item(), 
+          'PPV:', PPV, 'Mean PPV:', PPV.mean(), 'NPV:', NPV, 'Mean NPV:', NPV.mean())
     pred_encoder = model.get_pred_encoder()
     pred_encoder = pred_encoder.cpu().detach()
     metric_encoder = MulticlassAccuracy(num_classes=num_classes, average='micro', thresholds=None)
+    acc_pred_class_reduction = metric_encoder(pred_encoder, target)
+    metric_encoder = MulticlassAccuracy(num_classes=num_classes, average=None, thresholds=None)
     acc_pred = metric_encoder(pred_encoder, target)
+    
     metric_encoder = MulticlassF1Score(num_classes=num_classes, average=None)
     F1 = metric_encoder(pred_encoder, target)
     metric_encoder = MulticlassAUROC(num_classes=num_classes, average=None, thresholds=None)
@@ -91,8 +97,10 @@ def validation(model, epoch, writer):
     CM = confmat_encoder(pred_encoder, target)
 
     PPV_encoder, NPV_encoder = cal_metrics(CM)
-    print('[Validation] for encoders: ', '\t\t Accuracy:', acc_pred, 'AUC', AUROC_encoder, 'Mean AUC:', AUROC_encoder.mean(),
-           'PPV:', PPV_encoder, 'Mean PPV:', PPV_encoder.mean(), 'NPV:', NPV_encoder, 'Mean NPV:', NPV_encoder.mean())
+    print('[Validation] for encoders: ', '\t\t Accuracy:', acc_pred_class_reduction, 
+          'Per-class Acc', acc_pred, 'Mean Acc:', acc_pred.mean().item(),
+          'AUC', AUROC_encoder, 'Mean AUC:', AUROC_encoder.mean().item(), 'PPV:', PPV_encoder, 
+          'Mean PPV:', PPV_encoder.mean(), 'NPV:', NPV_encoder, 'Mean NPV:', NPV_encoder.mean())
 
 if __name__ == '__main__':
 
@@ -102,9 +110,13 @@ if __name__ == '__main__':
     min_pixel = int(opt.min_pixel * ((opt.patch_size[0] * opt.patch_size[1] * opt.patch_size[2]) / 100))
     # load dataset
     trainTransforms = Compose([RandFlip(prob=0.5), ScaleIntensity(), EnsureChannelFirst(), CenterSpatialCrop(opt.patch_size)])
-    train_set = NifitDataSet(opt.data_path, which_direction='AtoB', transforms=trainTransforms, shuffle_labels=False, train=True, phase='train', label_time=opt.label_time, control = opt.control, split=opt.split)
+    train_set = NifitDataSet(opt.data_path, which_direction='AtoB', transforms=trainTransforms, shuffle_labels=False, train=True, phase='train', label_time=opt.label_time, control = opt.control, split=opt.split, num_ctrl=opt.num_ctrl)
     print('length labeled train list:', len(train_set))
-    train_loader = DataLoader(train_set, batch_size=opt.batch_size, shuffle=True, num_workers=opt.workers*len(opt.gpu_ids), pin_memory=True, drop_last=True)  # Here are then fed to the network with a defined batch size
+    if len(train_set) < opt.batch_size:
+        drop_last = False
+    else:
+        drop_last = True
+    train_loader = DataLoader(train_set, batch_size=opt.batch_size, shuffle=True, num_workers=opt.workers*len(opt.gpu_ids), pin_memory=True, drop_last=drop_last)  # Here are then fed to the network with a defined batch size
     # unlabeled data
     trainTransformsStrong = Compose([RandAdjustContrast(prob=0.3, gamma=(0.6, 1.5)), RandFlip(prob=0.5), RandRotate(range_x=15.0, range_y=15.0, range_z=15.0, prob=0.5),
                                      ScaleIntensity(), EnsureChannelFirst(), CenterSpatialCrop(opt.patch_size)])
@@ -122,6 +134,8 @@ if __name__ == '__main__':
                             pin_memory=True)
 
     # create model
+    if len(opt.gpu_ids) > 0 and torch.cuda.is_available():
+        torch.backends.cudnn.benchmark = True
     print("Creating model...")
     model = create_model(opt)  # creation of the model
     model.setup(opt)
@@ -138,6 +152,7 @@ if __name__ == '__main__':
     total_steps = 0
     # label time =bl [NC, EMCI, LMCI, AD]; label time=Year 2 [NC, MCI, AD]
     num_classes = 4 if opt.label_time == 'bl' else 3
+    model.train_loader, model.test_loader = train_loader, test_loader
     MRI, PET, Non_Img, Label, length = GetFeatures([train_loader, test_loader], model)
     # create hypergraph
     model.HGconstruct(MRI, PET, Non_Img)
