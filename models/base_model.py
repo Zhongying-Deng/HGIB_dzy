@@ -77,9 +77,12 @@ class BaseModel():
         pass
 
     # update learning rate (called once every epoch)
-    def update_learning_rate(self):
+    def update_learning_rate(self, metric=None):
         for scheduler in self.schedulers:
-            scheduler.step()
+            if 'plateau' == self.opt.lr_policy:
+                scheduler.step(metric)
+            else:
+                scheduler.step()
         lr = self.optimizers[0].param_groups[0]['lr']
         print('learning rate = %.7f' % lr)
 
@@ -182,6 +185,11 @@ class BaseModel():
                 net = getattr(self, 'net' + name)
                 if isinstance(net, torch.nn.DataParallel):
                     net = net.module
+                if not os.path.exists(load_path):
+                    print('pretrained weights {} do not exist'.format(load_path))
+                    continue
+                else:
+                    print('loading pretrained weights from {}'.format(load_path))
                 # if you are using PyTorch newer than 0.4 (e.g., built from
                 # GitHub source), you can remove str() on self.device
                 state_dict = torch.load(load_path, map_location=str(self.device))
@@ -189,7 +197,7 @@ class BaseModel():
                     del state_dict._metadata
 
                 # patch InstanceNorm checkpoints prior to 0.4
-                net.load_state_dict(state_dict)
+                net.load_state_dict(state_dict, strict=False)
 
     # print network information
     def print_networks(self, verbose):

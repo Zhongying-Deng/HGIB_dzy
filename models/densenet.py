@@ -246,10 +246,28 @@ class DenseNet(nn.Module):
             elif isinstance(m, nn.Linear):
                 nn.init.constant_(torch.as_tensor(m.bias), 0)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.features(x)
-        x = self.class_layers(x)  # comment for our task, only extract features.
-        return x
+    def forward(self, x: torch.Tensor, return_feat_map=False) -> torch.Tensor:
+        if return_feat_map:
+            f = self.features.conv0(x)
+            f = self.features.norm0(f)
+            f = self.features.relu0(f)
+            f = self.features.pool0(f)
+            f = self.features.denseblock1(f)
+            f1 = self.features.transition1(f) # shape of f1: [30, 128, 12, 12, 12], input size 96
+            f = self.features.denseblock2(f1)
+            f2 = self.features.transition2(f) # shape of f2: [30, 256, 6, 6, 6]
+            f = self.features.denseblock3(f2)
+            f3 = self.features.transition3(f) # shape of f3: [30, 512, 3, 3, 3]
+            f = self.features.denseblock4(f3)
+            f = self.features.norm5(f)
+            f4 = self.class_layers.relu(f) # shape of f4: [30, 1024, 3, 3, 3]
+            f = self.class_layers.pool(f4)
+            out = self.class_layers.flatten(f)
+            return out, f1, f2, f3, f4
+        else:    
+            x = self.features(x)  # [30, 1024, 3, 3, 3] for input of size 96 or 112
+            x = self.class_layers(x)  # comment for our task, only extract features.
+            return x
 
 
 def _load_state_dict(model: nn.Module, arch: str, progress: bool):
