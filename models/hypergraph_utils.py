@@ -74,8 +74,16 @@ def hyperedge_concat(*H_list):
     :return: Fused hypergraph incidence matrix
     """
     H = None
-    for h in H_list:
-        if h is not None and h != []:
+    for i, h in enumerate(H_list):
+        if h is not None: 
+            if type(h) != list:
+                if h.shape[0] == 0:
+                    print('{}-th h.shape {}'.format(i, h.shape[0]))
+                    continue
+            else:
+                if h == []:
+                    print('{}-th h is an empty list: {}'.format(i, h))
+                    continue
             # for the first H appended to fused hypergraph incidence matrix
             if H is None:
                 H = h
@@ -832,7 +840,12 @@ class DHGLayer(GraphConvolution):
         """
         if self.structure is None:
             _N = feats.size(0)
-            idx = torch.LongTensor([sample_ids(edge_dict[i], self.ks) for i in range(_N)])  # (_N, ks)
+            idx_list = []
+            for i in range(_N):
+                tmp_list = sample_ids(edge_dict[i], self.ks)
+                idx_list.append([int(i) for i in tmp_list])
+            idx = torch.LongTensor(idx_list)
+            # idx = torch.LongTensor([sample_ids(edge_dict[i], self.ks) for i in range(_N)])  # (_N, ks)
             self.structure = idx
         else:
             idx = self.structure
@@ -1110,7 +1123,7 @@ class DHGNN(nn.Module):
         :param G:
         :return:
         """
-        ids = torch.tensor(range(248)).cuda()
+        ids = torch.tensor(range(feats.shape[0])).cuda() #torch.tensor(range(248)).cuda()
         # if phase=='train':
         #     ids = torch.tensor(range(200)).cuda()
         # elif phase=='test':
