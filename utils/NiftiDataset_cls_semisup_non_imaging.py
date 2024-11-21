@@ -3,7 +3,7 @@ import os
 import re
 import numpy as np
 import random
-import glob
+import csv
 import scipy.ndimage.interpolation as interpolation
 import scipy
 import torch
@@ -17,6 +17,7 @@ import torchio as tio
 from torch.utils.data import Dataset
 
 from monai.transforms import LoadImage, apply_transform
+from utils import fda
 
 class NifitSemiSupDataSet(torch.utils.data.Dataset):
     def __init__(self, data_path,
@@ -47,14 +48,27 @@ class NifitSemiSupDataSet(torch.utils.data.Dataset):
             unpickler = pickle.Unpickler(file_)
             self.df_data_path = unpickler.load()
         self.df = df
-
+        #if label_time == 'bl':
+        #    df = df[df['DX_bl'].notna()]
+        #    self.df = df
+        #    self.df = self.df[self.df['VISCODE'] == label_time].reset_index(drop=True)
+        #else:
+        #    df = df[df['DX'].notna()]
+        #    self.df = df
+        #    self.df = self.df[(self.df['VISCODE']==label_time)|(self.df['VISCODE']=='bl')].reset_index(drop=True)
+        #if label_time == 'bl':
         self.label_map = {'CN': 0, 'EMCI': 1, 'LMCI': 2, 'SMC':3, 'AD': 4}
+        #else:
+        #    self.label_map = {'CN':0, 'MCI':1, 'Dementia':2}
 
         self.MRIList = []
         self.PETList = []
         self.DemoList = []
         self.LabelList = []
         self.NonImageList = []
+        self.subject_ids = []
+        self.save_nonimg_info = []
+        self.phase = phase
         self.length = 0
         self.non_imaging_data = non_imaging_data
         self.non_image_features = ['AGE', 'PTGENDER', 'PTEDUCAT', 'APOE4', 'MMSE', 'ADNI_MEM', 'ADNI_EF',]
@@ -84,7 +98,7 @@ class NifitSemiSupDataSet(torch.utils.data.Dataset):
         Store the imaging data path into a list, and non-imaging data features into a list. When call forward, we can just get the image directly according to these lists.
         '''
         self.df = self.df.fillna(-1)
-        self.df = self.df.groupby(['PTID'])
+        self.df = self.df.groupby(['PTID']) # group the subjects according to their ID: PTID
         
         time_map = {'bl':'Month0', 'm03':'Month3', 'm06':'Month6','m12':'Year1','m24':'Year2'}
         label_map = self.label_map
@@ -92,6 +106,7 @@ class NifitSemiSupDataSet(torch.utils.data.Dataset):
         count = 0
         cnt_group = 0
         for name, group in self.df:
+            # total group number for training is 938
             cnt_group += 1
             # print(group)
             # group may contain two or even more rows, but with the same subject ID
@@ -99,11 +114,14 @@ class NifitSemiSupDataSet(torch.utils.data.Dataset):
             subject = group.iloc[0].loc['PTID'] # get the subject ID
             
             if not group.loc[group['VISCODE'] == img_time].empty:
+                    # 929 non-empty for training (i.e., having the baseline visit)
                     count += 1
                     if not time_map[img_time] in self.df_data_path[subject]['MRI']:
                         continue
                     if not time_map[img_time] in self.df_data_path[subject]['PET']:
                         continue
+                    # the baseline labels are not actually used, 
+                    # but used to keep the data format the same as the labeled ones
                     label = group.loc[group['VISCODE'] == img_time].iloc[0].loc['DX_bl']
             else:
                 continue
@@ -113,14 +131,28 @@ class NifitSemiSupDataSet(torch.utils.data.Dataset):
             self.MRIList.append(self.df_data_path[subject]['MRI'][time_map[img_time]][0])
             self.PETList.append(self.df_data_path[subject]['PET'][time_map[img_time]][0])
             self.NonImageList.append(self.read_non_image(group.loc[group['VISCODE'] == img_time].iloc[0]))
-
+            nonimg_info = group.loc[group['VISCODE'] == img_time].iloc[0]
+            if group.loc[group['VISCODE'] == labeltime]['DX'].empty:
+                nonimg_info.loc['DX'] = None
+            else:
+                nonimg_info.loc['DX'] = group.loc[group['VISCODE'] == labeltime]['DX'].iloc[0]
+            self.save_nonimg_info.append(nonimg_info)
+            self.subject_ids.append(subject)
         print('Length of unlabeled list: {}, non-image list: {}, MRI/PET list: {}'.format(
             len(self.LabelList), len(self.NonImageList), len(self.MRIList)))
         print('Image number for class 0-4: {}, {}, {}, {}, {}'.format(
             self.LabelList.count(0), self.LabelList.count(1), self.LabelList.count(2),
             self.LabelList.count(3), self.LabelList.count(4)))
+        # for training set, these above two prints 460 460 460; and 110, 109, 114, 52, 75 respectively
+        # the following prints 938, 929
         print('total group number {}, non-empty number (having baseline visit) {} for unlabeled data'.format(
             cnt_group, count))
+        df = pd.DataFrame(self.subject_ids)
+        if not os.path.exists('unlabeled_{}_subject_ids.csv'.format(self.phase)):
+            df.to_csv('unlabeled_{}_subject_ids.csv'.format(self.phase), index=False)
+        df_nonimg = pd.DataFrame(self.save_nonimg_info)
+        if not os.path.exists('unlabeled_{}_nonimg_info.csv'.format(self.phase)):
+            df_nonimg.to_csv('unlabeled_{}_nonimg_info.csv'.format(self.phase), index=False)
 
     def read_image(self, path):
         reader = sitk.ImageFileReader()
@@ -162,12 +194,19 @@ class NifitSemiSupDataSet(torch.utils.data.Dataset):
         assert not np.any(np.isnan(non_image))
 
         if self.use_strong_aug:
-            MRI_str_aug = image_MRI
-            PET_str_aug = image_PET
+            MRI_str_aug = image_MRI #fda.mix_amplitude(image_MRI, image_PET)
+            #MRI_str_aug = self.rand_gamma(image_MRI)
+            #axis = random.randint(0,2)
+            #rand_flip = tio.RandomFlip(axis, 0.5)
+            #MRI_str_aug = rand_flip(MRI_str_aug)
+            PET_str_aug = image_PET #fda.mix_amplitude(image_PET, image_MRI)
+            #PET_str_aug = self.rand_gamma(image_PET)
+            #PET_str_aug = rand_flip(PET_str_aug)
             if self.transforms_strong is not None:
                 MRI_str_aug = apply_transform(self.transforms_strong, MRI_str_aug, map_items=False)
                 PET_str_aug = apply_transform(self.transforms_strong, PET_str_aug, map_items=False)
             else:
+            # torch.Size([1, 96, 96, 96])
                 MRI_str_aug = apply_transform(self.transforms, MRI_str_aug, map_items=False)
                 PET_str_aug = apply_transform(self.transforms, PET_str_aug, map_items=False)
             return MRI_np, PET_np, label, torch.FloatTensor(non_image[:]), MRI_str_aug, PET_str_aug

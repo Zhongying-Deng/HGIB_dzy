@@ -27,7 +27,7 @@ class NifitDataSet(torch.utils.data.Dataset):
                  label_time='m24',
                  control = None,
                  root_path = "/rds/project/rds-LlrDsbHU5UM/sw991/Project_AD/data/ADNI-rawdata/",
-                 split=3):
+                 split=3, num_ctrl=None):
 
         # Init membership variables
         self.data_path = data_path
@@ -62,6 +62,10 @@ class NifitDataSet(torch.utils.data.Dataset):
         self.DemoList = []
         self.LabelList = []
         self.NonImageList = []
+        self.subject_ids = []
+        self.save_nonimg_info = []
+        self.phase = phase
+        self.num_ctrl = num_ctrl # control the number of subjects in each class
         self.length = 0
         self.non_imaging_data = non_imaging_data
         self.non_image_features = ['AGE', 'PTGENDER', 'PTEDUCAT', 'APOE4', 'MMSE', 'ADNI_MEM', 'ADNI_EF',]
@@ -132,14 +136,30 @@ class NifitDataSet(torch.utils.data.Dataset):
                     continue
 
             # store the information
-            self.LabelList.append(label_map[label])
-            self.MRIList.append(self.df_data_path[subject]['MRI'][time_map[img_time]][0])
-            self.PETList.append(self.df_data_path[subject]['PET'][time_map[img_time]][0])
+            if self.num_ctrl is None:
+                self.LabelList.append(label_map[label])
+                self.MRIList.append(self.df_data_path[subject]['MRI'][time_map[img_time]][0])
+                self.PETList.append(self.df_data_path[subject]['PET'][time_map[img_time]][0])
+                self.subject_ids.append(subject)
+            else:
+                if self.LabelList.count(label_map[label]) < self.num_ctrl:
+                    self.LabelList.append(label_map[label])
+                    self.MRIList.append(self.df_data_path[subject]['MRI'][time_map[img_time]][0])
+                    self.PETList.append(self.df_data_path[subject]['PET'][time_map[img_time]][0])
+                    self.subject_ids.append(subject)
+                else:
+                    continue
 
             if group.loc[group['VISCODE'] == img_time].empty:
                 self.NonImageList.append(self.read_non_image(group.loc[group['VISCODE'] == labeltime].iloc[0]))
+                nonimg_info = group.loc[group['VISCODE'] == labeltime].iloc[0]
+                nonimg_info.loc['DX'] = group.loc[group['VISCODE'] == labeltime]['DX']
+                self.save_nonimg_info.append(nonimg_info)
             else:
                 self.NonImageList.append(self.read_non_image(group.loc[group['VISCODE'] == img_time].iloc[0]))
+                nonimg_info = group.loc[group['VISCODE'] == img_time].iloc[0]
+                nonimg_info.loc['DX'] = group.loc[group['VISCODE'] == labeltime]['DX'].iloc[0]
+                self.save_nonimg_info.append(nonimg_info)
 
         print('Length of label list: {}, non-image list: {}, MRI/PET list: {}'.format(
             len(self.LabelList), len(self.NonImageList), len(self.MRIList)))
@@ -149,6 +169,12 @@ class NifitDataSet(torch.utils.data.Dataset):
         # for testing set, 48 48 48; 14 28 6
         # the following one print: total group number 892, empty number 319
         print('total group number {}, empty number {}'.format(cnt_group, count))
+        df = pd.DataFrame(self.subject_ids)
+        if not os.path.exists('labeled_{}_subject_ids.csv'.format(self.phase)):
+            df.to_csv('labeled_{}_subject_ids.csv'.format(self.phase), index=False)
+        df_nonimg = pd.DataFrame(self.save_nonimg_info)
+        if not os.path.exists('labeled_{}_nonimg_info.csv'.format(self.phase)):
+            df_nonimg.to_csv('labeled_{}_nonimg_info.csv'.format(self.phase), index=False)
 
     def read_image(self, path):
         reader = sitk.ImageFileReader()
