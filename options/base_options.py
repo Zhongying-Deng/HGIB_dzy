@@ -16,7 +16,7 @@ class BaseOptions():
         parser.add_argument('--PET_generator_root', type=str, default='/rds/project/rds-LlrDsbHU5UM/sw991/Project_AD/data/ADNI-gendata/CycleGAN', help='Train images path')
         parser.add_argument('--val_path', type=str, default='/rds/project/rds-LlrDsbHU5UM/sw991/Project_AD/data/ADNI-rawdata', help='Validation images path')
         parser.add_argument('--batch_size', type=int, default=30, help='input batch size')
-        parser.add_argument('--patch_size', default=[96, 96, 96], help='Size of the patches extracted from the image')
+        parser.add_argument('--patch_size', nargs='+', type=int, default=[96, 96, 96], help='Size of the patches extracted from the image')
         parser.add_argument('--input_nc', type=int, default=1, help='# of input image channels')
         parser.add_argument('--output_nc', type=int, default=384, help='# of output image channels')
         parser.add_argument('--resample', type=bool, default=False, help='Decide or not to rescale the images to a new resolution')

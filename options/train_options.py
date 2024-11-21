@@ -30,6 +30,11 @@ class TrainOptions(BaseOptions):
                             help='the loss weight for center loss. Default: 0.')
         parser.add_argument('--train_encoders', action='store_true', help='whether fix or train the encoders.')
         parser.add_argument('--use_strong_aug', action='store_true', help='use strong augmentation to images or not.')
+        parser.add_argument('--use_cons_x', type=int, default=1, help='use consistency regularization on labeled data or not.')
+        parser.add_argument('--num_ctrl', type=int, default=None, help='the number of subjects for each class in the labeled set.')
+        parser.add_argument('--label_ratio', type=float, default=None, help='the ratio of subjects for each class in the labeled set, used in cross-validation.')
+        parser.add_argument('--fold', type=int, default=1, help='which fold to be used for cross validation.')
+        parser.add_argument('--seed', type=int, default=124, help='random seed.')
         self.isTrain = True
         return parser
 
