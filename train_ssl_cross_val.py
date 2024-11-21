@@ -214,8 +214,8 @@ if __name__ == '__main__':
         epoch_iter += opt.batch_size
 
         model.set_HGinput(Label)
-        if epoch == 0:
-            validation(model, epoch*len(train_loader), writer)
+        #if epoch == 0:
+        #    validation(model, epoch*len(train_loader), writer)
         try:
             model.optimize_parameters(train_loader, test_loader, train_loader_u, epoch)
         except:
