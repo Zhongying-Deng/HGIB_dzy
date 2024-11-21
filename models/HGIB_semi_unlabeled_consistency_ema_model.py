@@ -9,7 +9,7 @@ from . import networks3D
 from .densenet import *
 from .hypergraph_utils import *
 from .hypergraph import *
-from utils import ema, contrastive_loss, cutout
+from utils import ema, contrastive_loss
 
 class HGIBSemiUnlabeledConsistencyEMAModel(BaseModel):
     def name(self):

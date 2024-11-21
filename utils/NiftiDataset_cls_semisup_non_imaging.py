@@ -17,7 +17,6 @@ import torchio as tio
 from torch.utils.data import Dataset
 
 from monai.transforms import LoadImage, apply_transform
-from utils import fda
 
 class NifitSemiSupDataSet(torch.utils.data.Dataset):
     def __init__(self, data_path,
@@ -40,8 +39,8 @@ class NifitSemiSupDataSet(torch.utils.data.Dataset):
         self.data_path = data_path
         self.root = root_path
         # change it bafore running
-        df = pd.read_csv("../../script_pre_processing/%s_info%d.csv"%(phase, split), low_memory=False)
-        df_path_filename = "../../script_pre_processing/%s_split%d.pkl"%(phase, split)
+        df = pd.read_csv("./%s_info%d.csv"%(phase, split), low_memory=False)
+        df_path_filename = "./%s_split%d.pkl"%(phase, split)
 
         self.df_data_path = None
         with open(df_path_filename, 'rb') as file_:
@@ -194,14 +193,8 @@ class NifitSemiSupDataSet(torch.utils.data.Dataset):
         assert not np.any(np.isnan(non_image))
 
         if self.use_strong_aug:
-            MRI_str_aug = image_MRI #fda.mix_amplitude(image_MRI, image_PET)
-            #MRI_str_aug = self.rand_gamma(image_MRI)
-            #axis = random.randint(0,2)
-            #rand_flip = tio.RandomFlip(axis, 0.5)
-            #MRI_str_aug = rand_flip(MRI_str_aug)
-            PET_str_aug = image_PET #fda.mix_amplitude(image_PET, image_MRI)
-            #PET_str_aug = self.rand_gamma(image_PET)
-            #PET_str_aug = rand_flip(PET_str_aug)
+            MRI_str_aug = image_MRI 
+            PET_str_aug = image_PET 
             if self.transforms_strong is not None:
                 MRI_str_aug = apply_transform(self.transforms_strong, MRI_str_aug, map_items=False)
                 PET_str_aug = apply_transform(self.transforms_strong, PET_str_aug, map_items=False)

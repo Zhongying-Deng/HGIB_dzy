@@ -34,8 +34,8 @@ class NifitDataSetCrossVal(torch.utils.data.Dataset):
         self.data_path = data_path
         self.root = root_path
         # change it bafore running
-        df = pd.read_csv("../../script_pre_processing/train_info%d.csv"%(split), low_memory=False)
-        df_path_filename = "../../script_pre_processing/train_split%d.pkl"%(split)
+        df = pd.read_csv("./train_info%d.csv"%(split), low_memory=False)
+        df_path_filename = "./train_split%d.pkl"%(split)
         self.read_files(df, df_path_filename, label_time)
 
         self.MRIList = []
@@ -80,8 +80,8 @@ class NifitDataSetCrossVal(torch.utils.data.Dataset):
                                      }
 
         # read the default test file, but the train/test split will be mixed and splitted again for cross validation
-        df = pd.read_csv("../../script_pre_processing/test_info%d.csv"%(split), low_memory=False)
-        df_path_filename = "../../script_pre_processing/test_split%d.pkl"%(split)
+        df = pd.read_csv("./test_info%d.csv"%(split), low_memory=False)
+        df_path_filename = "./test_split%d.pkl"%(split)
         self.read_files(df, df_path_filename, label_time)
         self.read_feasible_image(labeltime=label_time, control=control)
         self.cross_val_label_list[0] = self.LabelList[self.subjects_num_train:]
